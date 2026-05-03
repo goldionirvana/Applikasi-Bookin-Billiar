@@ -1,4 +1,4 @@
-export type TableStatus = 'available' | 'occupied';
+export type TableStatus = 'available' | 'occupied' | 'reserved';
 export type SessionType = 'open' | 'close';
 
 export interface Table {
@@ -13,6 +13,8 @@ export interface MenuItem {
   name: string;
   price: number;
   category: 'drink' | 'food';
+  stock: number;
+  lowStockThreshold: number;
 }
 
 export interface OrderItem {
@@ -21,17 +23,26 @@ export interface OrderItem {
   name: string;
   price: number;
   quantity: number;
-  variant?: string; // e.g., 'Goreng' or 'Godok'
+  variant?: string;
 }
 
 export interface BookingSession {
   startTime: string;
   customerName: string;
   isMember: boolean;
+  memberId?: string;
   tableId: string;
   orders: OrderItem[];
   sessionType: SessionType;
-  durationHours?: number; // Only for 'close'
+  durationHours?: number; 
+}
+
+export interface Reservation {
+  id: string;
+  tableId: string;
+  customerName: string;
+  startTime: string;
+  phone: string;
 }
 
 export interface Member {
@@ -39,11 +50,23 @@ export interface Member {
   name: string;
   phone: string;
   joinDate: string;
+  balance: number;
+  points: number;
+}
+
+export interface HappyHourRule {
+  id: string;
+  name: string;
+  startHour: number; // 0-23
+  endHour: number;   // 0-23
+  discountPercent: number;
+  isActive: boolean;
 }
 
 export interface PricingSettings {
   hourlyRate: number;
   memberDiscountPercent: number;
+  happyHourRules: HappyHourRule[];
 }
 
 export interface Transaction {
@@ -52,6 +75,7 @@ export interface Transaction {
   tableName: string;
   customerName: string;
   isMember: boolean;
+  memberId?: string;
   sessionType: SessionType;
   startTime: string;
   endTime: string;
@@ -60,6 +84,20 @@ export interface Transaction {
   tablePrice: number;
   ordersPrice: number;
   totalPrice: number;
+  pointsEarned: number;
+  paymentMethod: 'cash' | 'balance';
   orders: OrderItem[];
   date: string;
+  cashierName: string;
+  shiftId: string;
+}
+
+export interface Shift {
+  id: string;
+  cashierName: string;
+  startTime: string;
+  endTime?: string;
+  startingCash: number;
+  totalRevenue: number;
+  transactionsCount: number;
 }

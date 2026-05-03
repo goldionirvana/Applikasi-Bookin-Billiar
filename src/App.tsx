@@ -8,7 +8,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   Plus, 
   Settings, 
@@ -23,27 +23,110 @@ import {
   TrendingUp,
   X,
   PlusCircle,
-  Table as TableIcon
+  Table as TableIcon,
+  Package,
+  Calendar,
+  LogOut,
+  Wallet,
+  Star,
+  Sun,
+  Moon,
+  Volume2,
+  Trash2,
+  Download
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { 
+  BarChart, 
+  Bar, 
+  XAxis, 
+  YAxis, 
+  CartesianGrid, 
+  Tooltip, 
+  ResponsiveContainer,
+  LineChart,
+  Line
+} from 'recharts';
 import { storage } from './lib/storage';
-import { Table, Member, PricingSettings, Transaction, BookingSession, MenuItem, OrderItem } from './types';
-import { differenceInMinutes, format, addMinutes } from 'date-fns';
+import { 
+  Table, 
+  Member, 
+  PricingSettings, 
+  Transaction, 
+  BookingSession, 
+  MenuItem, 
+  OrderItem, 
+  Shift, 
+  Reservation,
+  HappyHourRule
+} from './types';
+import { differenceInMinutes, format, addMinutes, isSameDay, startOfWeek, endOfWeek, eachDayOfInterval } from 'date-fns';
 import { id } from 'date-fns/locale';
 import Receipt from './components/Receipt';
 
+const BilliardTableVisual = ({ active }: { active: boolean }) => (
+  <div className="relative w-full aspect-[2/1] bg-emerald-800 rounded-lg border-8 border-amber-900 shadow-inner overflow-hidden">
+    {/* Table Felt texture simulation */}
+    <div className="absolute inset-0 opacity-20 pointer-events-none" style={{ backgroundImage: 'radial-gradient(circle, #000 1px, transparent 1px)', backgroundSize: '10px 10px' }}></div>
+    
+    {/* Pockets */}
+    <div className="absolute top-0 left-0 w-6 h-6 bg-slate-950 rounded-br-full"></div>
+    <div className="absolute top-0 right-0 w-6 h-6 bg-slate-950 rounded-bl-full"></div>
+    <div className="absolute bottom-0 left-0 w-6 h-6 bg-slate-950 rounded-tr-full"></div>
+    <div className="absolute bottom-0 right-0 w-6 h-6 bg-slate-950 rounded-tl-full"></div>
+    <div className="absolute top-0 left-1/2 -translate-x-1/2 w-6 h-4 bg-slate-950 rounded-b-full"></div>
+    <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-6 h-4 bg-slate-950 rounded-t-full"></div>
+
+    {/* Balls */}
+    {active ? (
+      <>
+        <motion.div animate={{ x: [0, 10, -5, 0], y: [0, -5, 8, 0] }} transition={{ repeat: Infinity, duration: 4 }} className="absolute top-1/4 left-1/4 w-3 h-3 bg-white rounded-full shadow-sm shadow-black"></motion.div>
+        <motion.div animate={{ x: [0, -8, 4, 0], y: [0, 10, -3, 0] }} transition={{ repeat: Infinity, duration: 3 }} className="absolute top-1/2 left-2/3 w-3 h-3 bg-red-600 rounded-full shadow-sm shadow-black"></motion.div>
+        <motion.div animate={{ x: [0, 5, -12, 0], y: [0, 3, -6, 0] }} transition={{ repeat: Infinity, duration: 5 }} className="absolute bottom-1/4 right-1/3 w-3 h-3 bg-yellow-500 rounded-full shadow-sm shadow-black"></motion.div>
+        <div className="absolute inset-0 bg-blue-500/10 animate-pulse"></div>
+      </>
+    ) : (
+      <div className="absolute inset-0 flex items-center justify-center">
+        <div className="w-16 h-1 w-24 bg-white/20 rotate-45 rounded-full"></div>
+        <div className="w-16 h-1 w-24 bg-white/20 -rotate-45 rounded-full"></div>
+      </div>
+    )}
+  </div>
+);
+
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'members' | 'settings' | 'history'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'members' | 'settings' | 'history' | 'inventory' | 'reservations' | 'shifts'>('dashboard');
   const [tables, setTables] = useState<Table[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
   const [menu, setMenu] = useState<MenuItem[]>(storage.getMenu());
-  const [settings, setSettings] = useState<PricingSettings>(storage.getSettings());
+  const [settings, setSettings] = useState<PricingSettings>(() => {
+    const saved = storage.getSettings();
+    if (saved && saved.happyHourRules) return saved;
+    return {
+      hourlyRate: 50000,
+      memberDiscountPercent: 20,
+      happyHourRules: []
+    };
+  });
   const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [shifts, setShifts] = useState<Shift[]>(storage.getShifts());
+  const [activeShift, setActiveShift] = useState<Shift | null>(storage.getActiveShift());
+  const [reservations, setReservations] = useState<Reservation[]>(storage.getReservations());
   
+  // Theme and Sound
+  const [theme, setTheme] = useState<'dark' | 'light'>('dark');
+  const [soundEnabled, setSoundEnabled] = useState(true);
+  const notificationPlayed = useRef<Set<string>>(new Set());
+
   // Modals state
   const [isBookingModalOpen, setIsBookingModalOpen] = useState(false);
   const [isOrderModalOpen, setIsOrderModalOpen] = useState(false);
+  const [isShiftModalOpen, setIsShiftModalOpen] = useState(false);
+  const [isTopupModalOpen, setIsTopupModalOpen] = useState(false);
+  const [isReservationModalOpen, setIsReservationModalOpen] = useState(false);
+  
   const [selectedTable, setSelectedTable] = useState<Table | null>(null);
+  const [selectedMember, setSelectedMember] = useState<Member | null>(null);
   const [isFinishingModalOpen, setIsFinishingModalOpen] = useState(false);
   const [currentTransaction, setCurrentTransaction] = useState<Transaction | null>(null);
 
@@ -56,6 +139,7 @@ export default function App() {
   
   // F&B state
   const [selectedFoodVariant, setSelectedFoodVariant] = useState<'Goreng' | 'Godok'>('Goreng');
+  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'balance'>('cash');
 
   // Timer for dashboard updates
   const [refreshTimer, setRefreshTimer] = useState(0);
@@ -73,7 +157,7 @@ export default function App() {
     setTransactions(storage.getTransactions());
   }, []);
 
-  // Auto-stop logic for close sessions
+  // Auto-stop and notifications logic
   useEffect(() => {
     const interval = setInterval(() => {
       const now = new Date();
@@ -81,15 +165,46 @@ export default function App() {
         if (table.status === 'occupied' && table.currentSession?.sessionType === 'close') {
           const startTime = new Date(table.currentSession.startTime);
           const endTime = addMinutes(startTime, (table.currentSession.durationHours || 0) * 60);
+          const diffMin = differenceInMinutes(endTime, now);
           
           if (now >= endTime) {
             handleStopBooking(table);
+            if (soundEnabled) playNotification('end');
+          } else if (diffMin === 5 && !notificationPlayed.current.has(table.id + '-5m')) {
+            if (soundEnabled) playNotification('warning');
+            notificationPlayed.current.add(table.id + '-5m');
           }
         }
       });
-    }, 5000); // Check every 5 seconds for immediate response
+    }, 5000);
     return () => clearInterval(interval);
-  }, [tables]);
+  }, [tables, soundEnabled]);
+
+  const playNotification = (type: 'warning' | 'end') => {
+    try {
+      const audio = new Audio(type === 'warning' 
+        ? 'https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3' 
+        : 'https://assets.mixkit.co/active_storage/sfx/2014/2014-preview.mp3');
+      audio.play();
+    } catch (e) {
+      console.warn("Audio playback failed", e);
+    }
+  };
+
+  const calculateHourlyRate = (baseRate: number, isMember: boolean) => {
+    const hour = new Date().getHours();
+    let rate = baseRate;
+    
+    // Check Happy Hour
+    const happyRule = settings.happyHourRules.find(r => r.isActive && hour >= r.startHour && hour < r.endHour);
+    if (happyRule) {
+      rate = rate * (1 - happyRule.discountPercent / 100);
+    } else if (isMember) {
+      rate = rate * (1 - settings.memberDiscountPercent / 100);
+    }
+    
+    return Math.round(rate);
+  };
 
   const saveAll = (newTables: Table[]) => {
     setTables(newTables);
@@ -157,6 +272,35 @@ export default function App() {
     const tablePrice = Math.ceil((durationMinutes / 60) * hourlyRate);
     const ordersPrice = table.currentSession.orders.reduce((sum, item) => sum + (item.price * item.quantity), 0);
     const totalPrice = tablePrice + ordersPrice;
+    const pointsEarned = Math.floor(durationMinutes / 60);
+
+    // Deduct member balance if applicable
+    let updatedMembers = [...members];
+    if (paymentMethod === 'balance' && table.currentSession.memberId) {
+      updatedMembers = members.map(m => {
+        if (m.id === table.currentSession?.memberId) {
+          if (m.balance < totalPrice) {
+            alert('Saldo member tidak cukup! Dialihkan ke Cash.');
+            throw new Error('Insufficient balance');
+          }
+          return { ...m, balance: m.balance - totalPrice, points: m.points + pointsEarned };
+        }
+        return m;
+      });
+      setMembers(updatedMembers);
+      storage.saveMembers(updatedMembers);
+    }
+
+    // Deduct Inventory Stock
+    const updatedMenu = [...menu];
+    table.currentSession.orders.forEach(order => {
+      const itemIdx = updatedMenu.findIndex(mi => mi.id === order.menuId);
+      if (itemIdx >= 0) {
+        updatedMenu[itemIdx].stock -= order.quantity;
+      }
+    });
+    setMenu(updatedMenu);
+    storage.saveMenu(updatedMenu);
 
     const transaction: Transaction = {
       id: Math.random().toString(36).substr(2, 9),
@@ -164,6 +308,7 @@ export default function App() {
       tableName: table.name,
       customerName: table.currentSession.customerName,
       isMember: table.currentSession.isMember,
+      memberId: table.currentSession.memberId,
       sessionType: table.currentSession.sessionType,
       startTime: table.currentSession.startTime,
       endTime: endTime.toISOString(),
@@ -172,8 +317,12 @@ export default function App() {
       tablePrice,
       ordersPrice,
       totalPrice,
+      pointsEarned,
+      paymentMethod,
       orders: table.currentSession.orders,
-      date: new Date().toISOString()
+      date: new Date().toISOString(),
+      cashierName: activeShift?.cashierName || 'System',
+      shiftId: activeShift?.id || 'none'
     };
 
     const updatedTables = tables.map(t => {
@@ -186,6 +335,30 @@ export default function App() {
     const updatedTransactions = [transaction, ...transactions];
     setTransactions(updatedTransactions);
     storage.saveTransactions(updatedTransactions);
+
+    const updatedShifts = shifts.map(s => {
+      if (s.id === transaction.shiftId) {
+        return {
+          ...s,
+          totalRevenue: s.totalRevenue + totalPrice,
+          transactionsCount: s.transactionsCount + 1
+        };
+      }
+      return s;
+    });
+    setShifts(updatedShifts);
+    storage.saveShifts(updatedShifts);
+
+    if (activeShift && activeShift.id === transaction.shiftId) {
+      const updatedActive = {
+        ...activeShift,
+        totalRevenue: activeShift.totalRevenue + totalPrice,
+        transactionsCount: activeShift.transactionsCount + 1
+      };
+      setActiveShift(updatedActive);
+      storage.saveActiveShift(updatedActive);
+    }
+    
     saveAll(updatedTables);
 
     setCurrentTransaction(transaction);
@@ -193,13 +366,107 @@ export default function App() {
   };
 
   const handleAddTable = () => {
-    const newTable: Table = {
-      id: (tables.length + 1).toString(),
-      name: `Table ${tables.length + 1}`,
-      status: 'available'
-    };
-    saveAll([...tables, newTable]);
+    const name = prompt('Nama Meja (Contoh: MEJA 13):');
+    if (name) {
+      const newTable: Table = {
+        id: (tables.length + 1).toString(),
+        name,
+        status: 'available',
+      };
+      const updated = [...tables, newTable];
+      setTables(updated);
+      storage.saveTables(updated);
+    }
   };
+
+  const handleStartShift = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const formData = new FormData(e.currentTarget);
+    const newShift: Shift = {
+      id: Math.random().toString(36).substr(2, 9),
+      cashierName: formData.get('cashierName') as string,
+      startTime: new Date().toISOString(),
+      startingCash: Number(formData.get('startingCash')),
+      totalRevenue: 0,
+      transactionsCount: 0
+    };
+    setActiveShift(newShift);
+    storage.saveActiveShift(newShift);
+    setIsShiftModalOpen(false);
+  };
+
+  const handleEndShift = () => {
+    if (!activeShift) return;
+    const finalShift = { ...activeShift, endTime: new Date().toISOString() };
+    const updatedShifts = [finalShift, ...shifts];
+    setShifts(updatedShifts);
+    storage.saveShifts(updatedShifts);
+    setActiveShift(null);
+    storage.saveActiveShift(null);
+  };
+
+  const handleTopup = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const amount = Number(new FormData(e.currentTarget).get('amount'));
+    if (!selectedMember) return;
+    const updated = members.map(m => m.id === selectedMember.id ? { ...m, balance: m.balance + amount } : m);
+    setMembers(updated);
+    storage.saveMembers(updated);
+    setIsTopupModalOpen(false);
+  };
+
+  const handleAddReservation = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const fd = new FormData(e.currentTarget);
+    const newRes: Reservation = {
+      id: Math.random().toString(36).substr(2, 9),
+      tableId: fd.get('tableId') as string,
+      customerName: fd.get('name') as string,
+      phone: fd.get('phone') as string,
+      startTime: fd.get('time') as string,
+    };
+    const updated = [...reservations, newRes];
+    setReservations(updated);
+    storage.saveReservations(updated);
+    setIsReservationModalOpen(false);
+  };
+
+  const exportToCSV = () => {
+    const headers = ['ID', 'Date', 'Customer', 'Table', 'Orders', 'Total Price', 'Payment'];
+    const rows = transactions.map(tx => [
+      tx.id,
+      format(new Date(tx.date), 'yyyy-MM-dd HH:mm'),
+      tx.customerName,
+      tx.tableName,
+      tx.orders.map(o => `${o.quantity}x ${o.name}`).join('; '),
+      tx.totalPrice,
+      tx.paymentMethod
+    ]);
+    
+    let csvContent = "data:text/csv;charset=utf-8," + headers.join(",") + "\n" + rows.map(r => r.join(",")).join("\n");
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", `laporan_cuemaster_${format(new Date(), 'yyyy-MM-dd')}.csv`);
+    document.body.appendChild(link);
+    link.click();
+  };
+
+  const chartData = useMemo(() => {
+    const last7Days = eachDayOfInterval({
+      start: startOfWeek(new Date()),
+      end: endOfWeek(new Date())
+    });
+    
+    return last7Days.map(day => {
+      const dayStr = format(day, 'yyyy-MM-dd');
+      const dayTxs = transactions.filter(tx => tx.date.startsWith(dayStr));
+      return {
+        name: format(day, 'EEE'),
+        total: dayTxs.reduce((sum, tx) => sum + tx.totalPrice, 0)
+      };
+    });
+  }, [transactions]);
 
   const handleAddMember = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -208,7 +475,9 @@ export default function App() {
       id: Math.random().toString(36).substr(2, 9),
       name: formData.get('name') as string,
       phone: formData.get('phone') as string,
-      joinDate: new Date().toISOString()
+      joinDate: new Date().toISOString(),
+      balance: 0,
+      points: 0
     };
     const updatedMembers = [...members, newMember];
     setMembers(updatedMembers);
@@ -222,6 +491,7 @@ export default function App() {
     const newSettings: PricingSettings = {
       hourlyRate: Number(formData.get('rate')),
       memberDiscountPercent: Number(formData.get('discount')),
+      happyHourRules: settings.happyHourRules
     };
     setSettings(newSettings);
     storage.saveSettings(newSettings);
@@ -266,35 +536,6 @@ export default function App() {
     saveAll(updatedTables);
   };
 
-  const BilliardTableVisual = ({ active }: { active: boolean }) => (
-    <div className="relative w-full aspect-[2/1] bg-emerald-800 rounded-lg border-8 border-amber-900 shadow-inner overflow-hidden">
-      {/* Table Felt texture simulation */}
-      <div className="absolute inset-0 opacity-20 pointer-events-none" style={{ backgroundImage: 'radial-gradient(circle, #000 1px, transparent 1px)', backgroundSize: '10px 10px' }}></div>
-      
-      {/* Pockets */}
-      <div className="absolute top-0 left-0 w-6 h-6 bg-slate-950 rounded-br-full"></div>
-      <div className="absolute top-0 right-0 w-6 h-6 bg-slate-950 rounded-bl-full"></div>
-      <div className="absolute bottom-0 left-0 w-6 h-6 bg-slate-950 rounded-tr-full"></div>
-      <div className="absolute bottom-0 right-0 w-6 h-6 bg-slate-950 rounded-tl-full"></div>
-      <div className="absolute top-0 left-1/2 -translate-x-1/2 w-6 h-4 bg-slate-950 rounded-b-full"></div>
-      <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-6 h-4 bg-slate-950 rounded-t-full"></div>
-
-      {/* Balls */}
-      {active ? (
-        <>
-          <motion.div animate={{ x: [0, 10, -5, 0], y: [0, -5, 8, 0] }} transition={{ repeat: Infinity, duration: 4 }} className="absolute top-1/4 left-1/4 w-3 h-3 bg-white rounded-full shadow-sm shadow-black"></motion.div>
-          <motion.div animate={{ x: [0, -8, 4, 0], y: [0, 10, -3, 0] }} transition={{ repeat: Infinity, duration: 3 }} className="absolute top-1/2 left-2/3 w-3 h-3 bg-red-600 rounded-full shadow-sm shadow-black"></motion.div>
-          <motion.div animate={{ x: [0, 5, -12, 0], y: [0, 3, -6, 0] }} transition={{ repeat: Infinity, duration: 5 }} className="absolute bottom-1/4 right-1/3 w-3 h-3 bg-yellow-500 rounded-full shadow-sm shadow-black"></motion.div>
-          <div className="absolute inset-0 bg-blue-500/10 animate-pulse"></div>
-        </>
-      ) : (
-        <div className="absolute inset-0 flex items-center justify-center">
-          <div className="w-16 h-1 w-24 bg-white/20 rotate-45 rounded-full"></div>
-          <div className="w-16 h-1 w-24 bg-white/20 -rotate-45 rounded-full"></div>
-        </div>
-      )}
-    </div>
-  );
   const stats = useMemo(() => {
     const today = new Date().toISOString().split('T')[0];
     const todayTxs = transactions.filter(tx => tx.date.startsWith(today));
@@ -321,7 +562,10 @@ export default function App() {
           {[
             { id: 'dashboard', icon: LayoutDashboard, label: 'Dashboard' },
             { id: 'members', icon: Users, label: 'Anggota' },
+            { id: 'inventory', icon: Package, label: 'Stok F&B' },
+            { id: 'reservations', icon: Calendar, label: 'Reservasi' },
             { id: 'history', icon: TrendingUp, label: 'Riwayat' },
+            { id: 'shifts', icon: LogOut, label: 'Shift Kasir' },
             { id: 'settings', icon: Settings, label: 'Pengaturan' }
           ].map((item) => (
             <button
@@ -369,15 +613,63 @@ export default function App() {
             </h2>
           </div>
           
-          <div className="flex items-center gap-4 text-slate-400 font-mono text-sm bg-slate-900/50 px-4 py-2 rounded-full border border-slate-800">
-            <Clock size={16} />
-            {format(new Date(), 'EEEE, d MMMM yyyy', { locale: id })}
+          <div className="flex items-center gap-4">
+            <button 
+              onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+              className="p-2 bg-slate-900 border border-slate-800 rounded-full text-slate-400 hover:text-blue-500 transition-colors"
+            >
+              {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
+            </button>
+            <div className="flex items-center gap-4 text-slate-400 font-mono text-sm bg-slate-900/50 px-4 py-2 rounded-full border border-slate-800">
+              <Clock size={16} />
+              {format(new Date(), 'EEEE, d MMMM yyyy', { locale: id })}
+            </div>
+            {activeShift ? (
+              <div className="flex items-center gap-2 px-4 py-2 bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 rounded-full text-xs font-black">
+                <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></div>
+                {activeShift.cashierName}
+              </div>
+            ) : (
+              <button 
+                onClick={() => setIsShiftModalOpen(true)}
+                className="px-4 py-2 bg-blue-600 text-white rounded-full text-xs font-black shadow-lg shadow-blue-600/20"
+              >
+                MASUK SHIFT
+              </button>
+            )}
           </div>
         </header>
 
         {/* Tab Content */}
         {activeTab === 'dashboard' && (
           <div className="space-y-8">
+            {/* Business Performance Chart */}
+            <div className="bg-slate-900 border border-slate-800 rounded-[2rem] p-6 shadow-2xl">
+              <div className="flex justify-between items-center mb-6">
+                <div>
+                  <h3 className="text-xl font-bold text-white">Tren Pendapatan Mingguan</h3>
+                  <p className="text-slate-500 text-xs uppercase font-bold tracking-widest mt-1">Laporan Visual Performa</p>
+                </div>
+                <button onClick={exportToCSV} className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-slate-300 px-4 py-2 rounded-xl text-xs font-bold transition-all">
+                  <Download size={14} /> EXPORT CSV
+                </button>
+              </div>
+              <div className="h-[250px] w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={chartData}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
+                    <XAxis dataKey="name" stroke="#64748b" fontSize={12} tickLine={false} axisLine={false} />
+                    <YAxis stroke="#64748b" fontSize={12} tickLine={false} axisLine={false} tickFormatter={(value) => `Rp ${value/1000}k`} />
+                    <Tooltip 
+                      contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '12px' }}
+                      itemStyle={{ color: '#3b82f6', fontWeight: 'bold' }}
+                    />
+                    <Bar dataKey="total" fill="#3b82f6" radius={[6, 6, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+
             {/* Stats Cards */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               <div className="bg-slate-900 border border-slate-800 p-6 rounded-3xl shadow-xl shadow-black/20">
@@ -512,21 +804,136 @@ export default function App() {
           </div>
         )}
 
+        {activeTab === 'inventory' && (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            {menu.map(item => (
+              <div key={item.id} className="bg-slate-900 border border-slate-800 rounded-3xl p-6 relative overflow-hidden group">
+                <div className="flex justify-between items-start mb-4">
+                  <div className={`p-3 rounded-2xl ${item.category === 'drink' ? 'bg-blue-600/10 text-blue-500' : 'bg-emerald-600/10 text-emerald-500'}`}>
+                    {item.category === 'drink' ? <Volume2 size={24} /> : <Package size={24} />}
+                  </div>
+                  {item.stock <= item.lowStockThreshold && (
+                    <span className="px-2 py-1 bg-red-500 text-white text-[8px] font-black rounded-lg animate-bounce">LOW STOCK</span>
+                  )}
+                </div>
+                <h4 className="text-xl font-bold text-white mb-1">{item.name}</h4>
+                <div className="flex justify-between items-end mt-4">
+                  <div>
+                    <p className="text-slate-500 text-[10px] font-bold uppercase">Stok Tersedia</p>
+                    <p className={`text-2xl font-black ${item.stock <= item.lowStockThreshold ? 'text-red-500' : 'text-slate-200'}`}>{item.stock} pcs</p>
+                  </div>
+                  <div className="flex gap-2">
+                    <button 
+                      onClick={() => {
+                        const newStock = prompt('Update Stok:', item.stock.toString());
+                        if (newStock) {
+                          const updated = menu.map(m => m.id === item.id ? { ...m, stock: Number(newStock) } : m);
+                          setMenu(updated);
+                          storage.saveMenu(updated);
+                        }
+                      }}
+                      className="bg-slate-800 hover:bg-slate-700 text-white p-2 rounded-xl transition-all"
+                    >
+                      <Plus size={20} />
+                    </button>
+                  </div>
+                </div>
+                <div className="w-full h-1.5 bg-slate-800 rounded-full mt-6">
+                   <div 
+                    className={`h-full rounded-full ${item.stock <= item.lowStockThreshold ? 'bg-red-500' : (item.category === 'drink' ? 'bg-blue-500' : 'bg-emerald-500')}`}
+                    style={{ width: `${Math.min(100, (item.stock / 100) * 100)}%` }}
+                   ></div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {activeTab === 'reservations' && (
+          <div className="space-y-6">
+            <button 
+              onClick={() => setIsReservationModalOpen(true)}
+              className="bg-blue-600 hover:bg-blue-700 text-white font-black px-6 py-3 rounded-2xl transition-all flex items-center gap-2 shadow-xl shadow-blue-600/20"
+            >
+              <Calendar size={20} /> BUAT RESERVASI BARU
+            </button>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {reservations.map(res => (
+                <div key={res.id} className="bg-slate-900 border border-slate-800 rounded-3xl p-6 flex justify-between items-center group">
+                  <div className="flex items-center gap-4">
+                    <div className="w-14 h-14 bg-slate-800 rounded-2xl flex items-center justify-center text-blue-500 group-hover:scale-110 transition-transform">
+                      <TableIcon size={24} />
+                    </div>
+                    <div>
+                      <h4 className="text-xl font-bold text-white capitalize">{res.customerName}</h4>
+                      <p className="text-slate-500 text-xs font-bold uppercase tracking-wider">{res.phone}</p>
+                      <div className="flex items-center gap-2 text-blue-400 font-bold mt-1 text-sm">
+                        <Clock size={14} /> {format(new Date(res.startTime), 'dd MMM - HH:mm')}
+                      </div>
+                    </div>
+                  </div>
+                  <button 
+                    onClick={() => {
+                      const updated = reservations.filter(r => r.id !== res.id);
+                      setReservations(updated);
+                      storage.saveReservations(updated);
+                    }}
+                    className="text-slate-600 hover:text-red-500 p-3 hover:bg-red-500/10 rounded-2xl transition-all"
+                  >
+                    <Trash2 size={24} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'shifts' && (
+          <div className="space-y-6">
+             {activeShift && (
+               <div className="bg-emerald-600/10 border border-emerald-600/20 rounded-[2.5rem] p-8 flex justify-between items-center">
+                  <div>
+                    <h3 className="text-2xl font-black text-emerald-500 uppercase">Shift Aktif: {activeShift.cashierName}</h3>
+                    <p className="text-slate-500 font-mono mt-1">Mulai: {format(new Date(activeShift.startTime), 'HH:mm')}</p>
+                  </div>
+                  <button onClick={handleEndShift} className="bg-red-500 hover:bg-red-600 text-white font-black px-8 py-4 rounded-2xl shadow-xl shadow-red-500/20 transition-all flex items-center gap-2">
+                    <LogOut size={20} /> AKHIRI SHIFT
+                  </button>
+               </div>
+             )}
+             <div className="space-y-4">
+               <h4 className="text-xs font-black text-slate-500 uppercase tracking-widest pl-2">Riwayat Shift</h4>
+               {shifts.map(s => (
+                 <div key={s.id} className="bg-slate-900/50 border border-slate-800 p-6 rounded-[2rem] flex justify-between items-center">
+                    <div>
+                      <p className="text-white font-bold text-lg">{s.cashierName}</p>
+                      <p className="text-slate-500 text-xs font-mono">{format(new Date(s.startTime), 'dd/MM/yyyy HH:mm')} - {s.endTime ? format(new Date(s.endTime), 'HH:mm') : '...'}</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-emerald-500 font-black text-xl">Rp {s.totalRevenue.toLocaleString('id-ID')}</p>
+                      <p className="text-slate-500 text-[10px] font-bold uppercase">{s.transactionsCount} Transaksi</p>
+                    </div>
+                 </div>
+               ))}
+             </div>
+          </div>
+        )}
+
         {activeTab === 'members' && (
           <div className="max-w-4xl space-y-6">
              <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6">
-                <form onSubmit={handleAddMember} className="grid grid-cols-1 md:grid-cols-3 gap-4 pb-6 border-b border-slate-800 mb-6">
-                  <div>
-                    <label className="block text-slate-500 text-[10px] font-bold uppercase mb-2">Nama Lengkap</label>
-                    <input name="name" required className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-blue-500" placeholder="Contoh: John Doe" />
+                <form onSubmit={handleAddMember} className="grid grid-cols-1 md:grid-cols-3 gap-4 pb-6 border-b border-slate-800 mb-6 font-sans">
+                  <div className="md:col-span-1">
+                    <label className="block text-slate-500 text-[10px] font-black uppercase mb-2">Nama Lengkap</label>
+                    <input name="name" required className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2.5 text-white text-sm focus:outline-none focus:border-blue-500" placeholder="John" />
                   </div>
-                  <div>
-                    <label className="block text-slate-500 text-[10px] font-bold uppercase mb-2">Nomor Telepon</label>
-                    <input name="phone" required className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-blue-500" placeholder="0812xxxx" />
+                  <div className="md:col-span-1">
+                    <label className="block text-slate-500 text-[10px] font-black uppercase mb-2">Telepon</label>
+                    <input name="phone" required className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2.5 text-white text-sm focus:outline-none focus:border-blue-500" placeholder="08..." />
                   </div>
                   <div className="flex items-end">
-                    <button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 rounded-xl transition-all shadow-lg shadow-blue-600/20">
-                      Tambah Anggota
+                    <button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white font-black py-2.5 rounded-xl transition-all shadow-lg shadow-blue-600/20 text-xs">
+                      BUAT MEMBER
                     </button>
                   </div>
                 </form>
@@ -534,25 +941,45 @@ export default function App() {
                 <div className="overflow-x-auto">
                   <table className="w-full text-left">
                     <thead>
-                      <tr className="text-slate-500 text-xs uppercase font-black border-b border-slate-800">
-                        <th className="py-4 px-2">Nama</th>
-                        <th className="py-4">Telepon</th>
-                        <th className="py-4">Tanggal Bergabung</th>
+                      <tr className="text-slate-500 text-[10px] uppercase font-black border-b border-slate-800">
+                        <th className="py-4 px-2">Member</th>
+                        <th className="py-4">Info</th>
+                        <th className="py-4">Asset</th>
+                        <th className="py-4">Aksi</th>
                       </tr>
                     </thead>
                     <tbody className="text-slate-300">
                       {members.map(member => (
                         <tr key={member.id} className="border-b border-slate-800/50 hover:bg-slate-800/30">
-                          <td className="py-4 px-2 font-semibold">{member.name}</td>
-                          <td className="py-4 font-mono text-sm">{member.phone}</td>
-                          <td className="py-4 text-xs text-slate-500">
-                            {format(new Date(member.joinDate), 'dd MMM yyyy')}
+                          <td className="py-4 px-2">
+                             <p className="font-bold text-white text-sm">{member.name}</p>
+                             <p className="text-[10px] text-slate-500">{member.id}</p>
+                          </td>
+                          <td className="py-4">
+                            <p className="text-xs font-mono">{member.phone}</p>
+                            <p className="text-[10px] text-slate-600">{format(new Date(member.joinDate || Date.now()), 'dd/MM/yyyy')}</p>
+                          </td>
+                          <td className="py-4">
+                            <div className="flex flex-col gap-1">
+                               <div className="flex items-center gap-1.5 text-emerald-500 font-black text-xs">
+                                 <Wallet size={12} /> Rp {member.balance?.toLocaleString('id-ID') || 0}
+                               </div>
+                               <div className="flex items-center gap-1.5 text-yellow-500 font-black text-xs">
+                                 <Star size={12} /> {member.points || 0} Pts
+                               </div>
+                            </div>
+                          </td>
+                          <td className="py-4">
+                             <button 
+                              onClick={() => { setSelectedMember(member); setIsTopupModalOpen(true); }}
+                              className="bg-slate-800 hover:bg-emerald-600 text-white px-3 py-1.5 rounded-lg text-[10px] font-black transition-all"
+                             >TOPUP</button>
                           </td>
                         </tr>
                       ))}
                       {members.length === 0 && (
                         <tr>
-                          <td colSpan={3} className="py-12 text-center text-slate-600 italic">Belum ada anggota terdaftar</td>
+                          <td colSpan={4} className="py-12 text-center text-slate-600 italic">Belum ada anggota terdaftar</td>
                         </tr>
                       )}
                     </tbody>
@@ -886,20 +1313,105 @@ export default function App() {
                   {currentTransaction && <Receipt transaction={currentTransaction} settings={settings} />}
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
-                  <button 
-                    onClick={printReceipt}
-                    className="bg-blue-600 text-white font-bold py-4 rounded-2xl flex items-center justify-center gap-2 shadow-xl shadow-blue-600/30"
-                  >
-                    <Printer size={20} /> CETAK
-                  </button>
-                  <button 
-                    onClick={() => setIsFinishingModalOpen(false)}
-                    className="bg-slate-800 text-white font-bold py-4 rounded-2xl shadow-xl hover:bg-slate-700"
-                  >
-                    SELESAI
-                  </button>
+                <div className="space-y-4 bg-slate-900 p-6 rounded-3xl border border-slate-800 mb-4">
+                    <div className="space-y-4">
+                       <label className="block text-slate-500 text-[10px] font-bold uppercase mb-2">Metode Pembayaran</label>
+                       <div className="flex gap-4">
+                          <button 
+                            onClick={() => setPaymentMethod('cash')}
+                            className={`flex-1 p-4 rounded-2xl border-2 transition-all flex flex-col items-center gap-2 ${paymentMethod === 'cash' ? 'bg-blue-600/10 border-blue-600' : 'bg-slate-800 border-slate-700 text-slate-500'}`}
+                          >
+                             <Wallet size={24} />
+                             <span className="text-xs font-black">CASH / QRIS</span>
+                          </button>
+                          <button 
+                            disabled={!currentTransaction?.isMember}
+                            onClick={() => setPaymentMethod('balance')}
+                            className={`flex-1 p-4 rounded-2xl border-2 transition-all flex flex-col items-center gap-2 ${paymentMethod === 'balance' ? 'bg-emerald-600/10 border-emerald-600' : 'bg-slate-800 border-slate-700 text-slate-500 opacity-50'}`}
+                          >
+                             <Star size={24} />
+                             <span className="text-xs font-black">SALDO MEMBER</span>
+                          </button>
+                       </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <button 
+                        onClick={printReceipt}
+                        className="bg-blue-600 text-white font-bold py-4 rounded-2xl flex items-center justify-center gap-2 shadow-xl shadow-blue-600/30"
+                      >
+                        <Printer size={20} /> CETAK
+                      </button>
+                      <button 
+                        onClick={() => {
+                          setIsFinishingModalOpen(false);
+                          setCurrentTransaction(null);
+                          setPaymentMethod('cash');
+                        }}
+                        className="bg-slate-800 text-white font-bold py-4 rounded-2xl shadow-xl hover:bg-slate-700"
+                      >
+                        SELESAI
+                      </button>
+                    </div>
                 </div>
+              </motion.div>
+            </div>
+          )}
+
+          {isShiftModalOpen && (
+            <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+              <div className="absolute inset-0 bg-black/90 backdrop-blur-md" />
+              <motion.div initial={{ scale: 0.9 }} animate={{ scale: 1 }} className="relative bg-slate-900 border border-slate-800 p-8 rounded-[3rem] w-full max-w-sm shadow-2xl">
+                 <h3 className="text-2xl font-black text-white italic mb-6 text-center">LOGIN SHIFT KASIR</h3>
+                 <form onSubmit={handleStartShift} className="space-y-6">
+                    <div>
+                      <label className="block text-slate-500 text-[10px] font-black uppercase mb-2">Nama Kasir</label>
+                      <input name="cashierName" required className="w-full bg-slate-800 border border-slate-700 rounded-2xl px-6 py-4 text-white font-bold focus:outline-none focus:border-blue-500" />
+                    </div>
+                    <div>
+                      <label className="block text-slate-500 text-[10px] font-black uppercase mb-2">Modal Awal (Rp)</label>
+                      <input name="startingCash" type="number" required className="w-full bg-slate-800 border border-slate-700 rounded-2xl px-6 py-4 text-white font-bold focus:outline-none focus:border-blue-500" />
+                    </div>
+                    <button type="submit" className="w-full bg-blue-600 text-white font-black py-4 rounded-2xl shadow-xl shadow-blue-600/30">MULAI SHIFT</button>
+                 </form>
+              </motion.div>
+            </div>
+          )}
+
+          {isTopupModalOpen && (
+             <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+              <div onClick={() => setIsTopupModalOpen(false)} className="absolute inset-0 bg-black/80 backdrop-blur-sm" />
+              <motion.div initial={{ y: 50 }} animate={{ y: 0 }} className="relative bg-slate-900 border border-slate-800 p-8 rounded-[2.5rem] w-full max-w-xs shadow-2xl">
+                 <h3 className="text-xl font-black text-white italic mb-4 uppercase">TOPUP SALDO</h3>
+                 <p className="text-slate-500 text-xs font-bold mb-6 uppercase">MEMBER: {selectedMember?.name}</p>
+                 <form onSubmit={handleTopup} className="space-y-4 font-sans">
+                    <input name="amount" type="number" required placeholder="Jumlah Topup (Rp)" className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white font-bold focus:outline-none focus:border-emerald-500" />
+                    <button type="submit" className="w-full bg-emerald-600 text-white font-black py-3 rounded-xl text-xs uppercase shadow-lg shadow-emerald-600/20">Konfirmasi Topup</button>
+                    <button type="button" onClick={() => setIsTopupModalOpen(false)} className="w-full text-slate-500 font-bold text-[10px] py-2 uppercase">BATAL</button>
+                 </form>
+              </motion.div>
+            </div>
+          )}
+
+          {isReservationModalOpen && (
+             <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+              <div onClick={() => setIsReservationModalOpen(false)} className="absolute inset-0 bg-black/80 backdrop-blur-sm" />
+              <motion.div initial={{ scale: 0.8 }} animate={{ scale: 1 }} className="relative bg-slate-900 border border-slate-800 p-8 rounded-[2.5rem] w-full max-w-sm shadow-2xl">
+                 <h3 className="text-xl font-black text-white italic mb-6 flex items-center gap-3 align-middle">
+                   <Calendar size={24} className="text-blue-500" /> RESERVASI MEJA
+                 </h3>
+                 <form onSubmit={handleAddReservation} className="space-y-4 font-sans">
+                    <div>
+                      <label className="block text-slate-500 text-[10px] font-black uppercase mb-1 pl-2">Meja</label>
+                      <select name="tableId" required className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white text-sm">
+                        {tables.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                      </select>
+                    </div>
+                    <input name="name" required placeholder="Nama Pelanggan" className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white text-sm" />
+                    <input name="phone" required placeholder="No. Telepon" className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white text-sm" />
+                    <input name="time" type="datetime-local" required className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white text-sm" />
+                    <button type="submit" className="w-full bg-blue-600 text-white font-black py-4 rounded-xl text-xs uppercase tracking-widest shadow-xl shadow-blue-600/20">BUAT JADWAL</button>
+                 </form>
               </motion.div>
             </div>
           )}
