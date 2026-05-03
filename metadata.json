@@ -1,0 +1,6 @@
+{
+  "name": "CueMaster - Billiard Hall Manager",
+  "description": "Interactive billiard booking system with real-time table tracking, member promos, and receipt printing.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
