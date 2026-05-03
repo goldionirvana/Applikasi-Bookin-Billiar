@@ -1,4 +1,5 @@
 export type TableStatus = 'available' | 'occupied';
+export type SessionType = 'open' | 'close';
 
 export interface Table {
   id: string;
@@ -29,6 +30,8 @@ export interface BookingSession {
   isMember: boolean;
   tableId: string;
   orders: OrderItem[];
+  sessionType: SessionType;
+  durationHours?: number; // Only for 'close'
 }
 
 export interface Member {
@@ -49,6 +52,7 @@ export interface Transaction {
   tableName: string;
   customerName: string;
   isMember: boolean;
+  sessionType: SessionType;
   startTime: string;
   endTime: string;
   durationMinutes: number;

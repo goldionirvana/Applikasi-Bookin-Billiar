@@ -51,15 +51,45 @@ export default function App() {
   const [newCustomerName, setNewCustomerName] = useState('');
   const [isMemberSelection, setIsMemberSelection] = useState(false);
   const [selectedMemberId, setSelectedMemberId] = useState('');
+  const [sessionType, setSessionType] = useState<'open' | 'close'>('open');
+  const [sessionDuration, setSessionDuration] = useState(1);
   
   // F&B state
   const [selectedFoodVariant, setSelectedFoodVariant] = useState<'Goreng' | 'Godok'>('Goreng');
+
+  // Timer for dashboard updates
+  const [refreshTimer, setRefreshTimer] = useState(0);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setRefreshTimer(prev => prev + 1);
+    }, 10000); // Update UI every 10 seconds is enough for the duration display
+    return () => clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     setTables(storage.getTables());
     setMembers(storage.getMembers());
     setTransactions(storage.getTransactions());
   }, []);
+
+  // Auto-stop logic for close sessions
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const now = new Date();
+      tables.forEach(table => {
+        if (table.status === 'occupied' && table.currentSession?.sessionType === 'close') {
+          const startTime = new Date(table.currentSession.startTime);
+          const endTime = addMinutes(startTime, (table.currentSession.durationHours || 0) * 60);
+          
+          if (now >= endTime) {
+            handleStopBooking(table);
+          }
+        }
+      });
+    }, 5000); // Check every 5 seconds for immediate response
+    return () => clearInterval(interval);
+  }, [tables]);
 
   const saveAll = (newTables: Table[]) => {
     setTables(newTables);
@@ -87,7 +117,9 @@ export default function App() {
             customerName: customerName || 'Guest',
             isMember: isMember,
             tableId: t.id,
-            orders: []
+            orders: [],
+            sessionType: sessionType,
+            durationHours: sessionType === 'close' ? sessionDuration : undefined
           }
         };
       }
@@ -99,13 +131,22 @@ export default function App() {
     setNewCustomerName('');
     setIsMemberSelection(false);
     setSelectedMemberId('');
+    setSessionType('open');
+    setSessionDuration(1);
   };
 
   const handleStopBooking = (table: Table) => {
     if (!table.currentSession) return;
 
     const startTime = new Date(table.currentSession.startTime);
-    const endTime = new Date();
+    let endTime = new Date();
+    
+    // If it was a close session and reached its limit, use the limit as end time for precision
+    if (table.currentSession.sessionType === 'close') {
+        const plannedEndTime = addMinutes(startTime, (table.currentSession.durationHours || 0) * 60);
+        if (endTime > plannedEndTime) endTime = plannedEndTime;
+    }
+
     const durationMinutes = Math.max(1, differenceInMinutes(endTime, startTime));
     
     let hourlyRate = settings.hourlyRate;
@@ -123,6 +164,7 @@ export default function App() {
       tableName: table.name,
       customerName: table.currentSession.customerName,
       isMember: table.currentSession.isMember,
+      sessionType: table.currentSession.sessionType,
       startTime: table.currentSession.startTime,
       endTime: endTime.toISOString(),
       durationMinutes,
@@ -382,7 +424,9 @@ export default function App() {
                       <div className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-tighter ${
                         table.status === 'occupied' ? 'bg-blue-600 text-white animate-pulse' : 'bg-slate-800 text-slate-400'
                       }`}>
-                        {table.status === 'occupied' ? 'Sedang Main' : 'Tersedia'}
+                        {table.status === 'occupied' 
+                          ? (table.currentSession?.sessionType === 'close' ? 'Close Table' : 'Open Table') 
+                          : 'Tersedia'}
                       </div>
                       <div className="text-slate-500 font-black text-xs">#{table.id}</div>
                     </div>
@@ -419,11 +463,24 @@ export default function App() {
                         </div>
                         
                         <div className="pt-3 border-t border-slate-800 flex justify-between items-center">
-                          <div className="flex items-center gap-1.5 text-slate-400">
-                            <Clock size={12} className="text-blue-500" />
-                            <span className="text-xs font-mono font-bold">
-                              {format(new Date(table.currentSession?.startTime || ''), 'HH:mm')}
-                            </span>
+                          <div className="flex flex-col">
+                            <div className="flex items-center gap-1.5 text-slate-400">
+                              <Clock size={12} className="text-blue-500" />
+                              <span className="text-xs font-mono font-bold">
+                                {format(new Date(table.currentSession?.startTime || ''), 'HH:mm')}
+                              </span>
+                              <span className="text-[10px] text-slate-500 font-mono">
+                                ({differenceInMinutes(new Date(), new Date(table.currentSession?.startTime || ''))}m)
+                              </span>
+                            </div>
+                            {table.currentSession?.sessionType === 'close' && (
+                              <p className="text-[10px] font-bold text-red-400 mt-0.5">
+                                Limit: {table.currentSession.durationHours} Jam 
+                                <span className="ml-1 opacity-70">
+                                  ({Math.max(0, (table.currentSession.durationHours || 0) * 60 - differenceInMinutes(new Date(), new Date(table.currentSession.startTime)))}m left)
+                                </span>
+                              </p>
+                            )}
                           </div>
                           <button 
                             onClick={(e) => {
@@ -616,6 +673,40 @@ export default function App() {
                        <p className="text-slate-500 text-[10px] font-bold uppercase">Meja Dipilih</p>
                        <p className="text-white font-bold">{selectedTable?.name}</p>
                      </div>
+                  </div>
+
+                  <div className="space-y-4">
+                    <div className="flex p-1 bg-slate-800 rounded-xl">
+                      <button 
+                        onClick={() => setSessionType('open')}
+                        className={`flex-1 py-3 text-[10px] font-black rounded-lg transition-all ${sessionType === 'open' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-400'}`}
+                      >
+                        OPEN TABLE
+                      </button>
+                      <button 
+                        onClick={() => setSessionType('close')}
+                        className={`flex-1 py-3 text-[10px] font-black rounded-lg transition-all ${sessionType === 'close' ? 'bg-red-500 text-white shadow-lg' : 'text-slate-400'}`}
+                      >
+                        CLOSE TABLE
+                      </button>
+                    </div>
+
+                    {sessionType === 'close' && (
+                      <div className="bg-slate-800/30 p-4 rounded-2xl border border-slate-800">
+                        <label className="block text-slate-500 text-[10px] font-bold uppercase mb-3">Durasi (Kelipatan 1 Jam)</label>
+                        <div className="flex gap-2">
+                          {[1, 2, 3, 4, 5].map(h => (
+                            <button
+                              key={h}
+                              onClick={() => setSessionDuration(h)}
+                              className={`flex-1 py-2 rounded-lg text-sm font-bold border transition-all ${sessionDuration === h ? 'bg-red-500 border-red-400 text-white' : 'border-slate-700 text-slate-500 hover:border-slate-500'}`}
+                            >
+                              {h} H
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   <div className="space-y-4">

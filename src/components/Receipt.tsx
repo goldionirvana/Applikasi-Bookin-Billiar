@@ -34,6 +34,10 @@ const Receipt: React.FC<ReceiptProps> = ({ transaction }) => {
           <span>STATUS:</span>
           <span>{transaction.isMember ? 'MEMBER' : 'REGULER'}</span>
         </div>
+        <div className="flex justify-between">
+          <span>JENIS:</span>
+          <span className="font-bold">{transaction.sessionType === 'close' ? 'CLOSE' : 'OPEN'}</span>
+        </div>
       </div>
 
       <div className="space-y-1 mb-4">
